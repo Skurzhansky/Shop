@@ -12,6 +12,76 @@ const SESSION_KEY  = 'rybhoz_session_v3'; // текущая сессия (sessio
 const ADMIN_KEY    = 'rybhoz_admin_sess'; // admin флаг (sessionStorage)
 const sp = o => o;
 
+/* ============================================================
+   ХРАНИЛИЩЕ — IndexedDB (вмещает картинки) с fallback на localStorage
+   localStorage ограничен ~5МБ, картинки-data-URI быстро его переполняют
+   и сохранение молча падает. IndexedDB вмещает сотни МБ.
+============================================================ */
+const DB = {
+  _db: null,
+  _ready: null,
+
+  open() {
+    if (this._ready) return this._ready;
+    this._ready = new Promise((resolve) => {
+      if (!window.indexedDB) { resolve(null); return; }
+      try {
+        const req = indexedDB.open('rybhoz_db', 1);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        };
+        req.onsuccess = (e) => { this._db = e.target.result; resolve(this._db); };
+        req.onerror = () => resolve(null);
+      } catch (e) { resolve(null); }
+    });
+    return this._ready;
+  },
+
+  async get(key) {
+    const db = await this.open();
+    if (!db) { try { return JSON.parse(localStorage.getItem(key)); } catch(e){ return null; } }
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction('kv', 'readonly');
+        const req = tx.objectStore('kv').get(key);
+        req.onsuccess = () => resolve(req.result != null ? req.result : null);
+        req.onerror = () => resolve(null);
+      } catch (e) { resolve(null); }
+    });
+  },
+
+  async set(key, value) {
+    const db = await this.open();
+    if (!db) {
+      // fallback: localStorage (может не вместить большие данные)
+      try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+      catch (e) { return false; }
+    }
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(value, key);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      } catch (e) { resolve(false); }
+    });
+  },
+
+  async del(key) {
+    const db = await this.open();
+    if (!db) { try { localStorage.removeItem(key); } catch(e){} return; }
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch (e) { resolve(); }
+    });
+  }
+};
+
 /* ---------- КАТАЛОГ ---------- */
 const DEFAULT_GROUPS = [
   {
@@ -165,22 +235,40 @@ function uid() { return 'u' + Date.now() + Math.random().toString(36).slice(2, 7
 const Users = {
   _table: null,
 
+  /* асинхронная инициализация из IndexedDB (с миграцией из localStorage) */
+  async init() {
+    if (this._table) return;
+    let data = await DB.get(USERS_KEY);
+    if (!data) {
+      // миграция старых данных из localStorage
+      try { data = JSON.parse(localStorage.getItem(USERS_KEY)); } catch (e) { data = null; }
+      if (data) { await DB.set(USERS_KEY, data); }
+    }
+    this._table = data || {};
+  },
+
   _load() {
     if (this._table) return;
+    // синхронный fallback (если init ещё не отработал)
     try { this._table = JSON.parse(localStorage.getItem(USERS_KEY)) || {}; }
     catch (e) { this._table = {}; }
   },
 
   _save() {
+    // память + персистентность в IndexedDB (фоном)
     try { localStorage.setItem(USERS_KEY, JSON.stringify(this._table)); } catch (e) {}
+    DB.set(USERS_KEY, this._table);
   },
 
   /* новый пустой профиль */
   _blank(id, name, email, phone, passHash) {
     return { id, name, email: email.toLowerCase().trim(), phone, passHash,
       cart: [], favorites: [], orders: [], bonus: 0,
-      manualDiscount: 0,   // ручная скидка %, назначенная админом
-      blocked: false,      // в чёрном списке
+      manualDiscount: 0,        // ручная скидка %, назначенная админом
+      autoDiscountOff: false,   // автоскидка отключена индивидуально для этого клиента
+      blocked: false,           // в чёрном списке
+      avatar: '',               // аватар (data URI)
+      bio: '',                  // информация о себе
       addresses: [], createdAt: new Date().toISOString() };
   },
 
@@ -397,6 +485,25 @@ const Store = {
     return t.slice().sort((a,b)=>a.orders-b.orders);
   },
 
+  /* асинхронная инициализация из IndexedDB (с миграцией из localStorage) */
+  async init() {
+    let raw = await DB.get(STORE_KEY);
+    if (!raw) {
+      // миграция из localStorage
+      try { raw = JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) { raw = null; }
+      if (raw) await DB.set(STORE_KEY, raw);
+    }
+    try {
+      this.state = raw ? Object.assign(this._defaults(), raw) : this._defaults();
+      if (!this.state.groups) this.state.groups = JSON.parse(JSON.stringify(DEFAULT_GROUPS));
+      if (!this.state.blog)   this.state.blog   = JSON.parse(JSON.stringify(DEFAULT_BLOG));
+      if (!this.state.discounts) this.state.discounts = this._defaults().discounts;
+      if (!this.state.sections)  this.state.sections = {};
+    } catch (e) { this.state = this._defaults(); }
+    this.state.isAdmin = false;
+    return this.state;
+  },
+
   load() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
@@ -410,14 +517,20 @@ const Store = {
     return this.state;
   },
 
+  /* save → возвращает Promise<bool> (успех записи в надёжное хранилище) */
   save() {
     const {isAdmin, ...rest} = this.state;
+    // лёгкая попытка в localStorage (может упасть на больших картинках)
     try { localStorage.setItem(STORE_KEY, JSON.stringify(rest)); } catch (e) {}
+    // основное хранилище — IndexedDB
+    return DB.set(STORE_KEY, rest);
   },
 
   reset() {
     this.state = this._defaults(); this.save();
     try { localStorage.removeItem(USERS_KEY); } catch (e) {}
+    DB.del(USERS_KEY);
+    if (Users) Users._table = {};
   },
 
   group(id)  { return this.state.groups.find(g => g.id === id); },

@@ -212,8 +212,9 @@ img{max-width:100%;display:block}
   width:28px;height:28px;border-radius:50%;
   background:#15293f;color:var(--orange);
   font-weight:900;font-size:.82rem;display:grid;place-items:center;
-  border:2px solid #15293f;flex-shrink:0;text-transform:uppercase;
+  border:2px solid #15293f;flex-shrink:0;text-transform:uppercase;overflow:hidden;
 }
+.user-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
 .btn-logout{
   width:36px;height:36px;border-radius:10px;
   background:rgba(21,41,63,.2);border:none;color:#15293f;
@@ -1274,3 +1275,77 @@ body.admin .editable:focus{outline-color:var(--orange);background:rgba(248,121,2
   font-size: .9rem;
 }
 .info-block-del:hover { background: rgba(224,100,100,.35); }
+
+/* ===== ВИТРИНА ГРУППЫ: обложка + кнопка настройки ===== */
+.gc-cover-stage {
+  position: relative;
+  flex: 1;
+  margin: 0 18px 18px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: #1b2238;
+  border: 2px solid rgba(248,121,29,.25);
+  min-height: 180px;
+}
+.gc-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  position: absolute;
+  inset: 0;
+}
+.group-card.big .gc-cover-stage { min-height: 300px; }
+.gc-edit {
+  position: absolute;
+  top: 14px;
+  right: 90px;
+  z-index: 5;
+  background: var(--orange);
+  color: #15293f;
+  border: none;
+  border-radius: 9px;
+  padding: 6px 12px;
+  font-weight: 800;
+  font-size: .8rem;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: 0 4px 12px rgba(0,0,0,.35);
+}
+.gc-edit:hover { background: var(--orange-bright); }
+
+/* подсказка в окне авторизации (зачем нужен вход) */
+.auth-hint {
+  background: rgba(248,121,29,.12);
+  border: 1px solid rgba(248,121,29,.4);
+  color: var(--orange);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: .85rem;
+  margin: 0 0 16px;
+  text-align: center;
+}
+
+/* ===== АВАТАР И ПРОФИЛЬ ===== */
+.profile-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 6px;
+}
+.profile-avatar {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: var(--orange);
+  color: #15293f;
+  display: grid;
+  place-items: center;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 900;
+  font-size: 2rem;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 3px solid var(--orange);
+}
+.profile-avatar img { width: 100%; height: 100%; object-fit: cover; }

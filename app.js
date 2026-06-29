@@ -6,7 +6,7 @@
 'use strict';
 
 const S = Store;
-S.load();
+S.load(); // синхронный быстрый старт (localStorage), затем перезагрузим из IndexedDB
 Session.load(); // загружаем сессию пользователя сразу
 
 const app = document.getElementById('app');
@@ -122,6 +122,8 @@ function iconTrash(){return '<svg viewBox="0 0 24 24" fill="none" stroke="curren
    КОМПОНЕНТ: карточка-ГРУППА с каруселью товаров внутри
 ============================================================ */
 function groupCard(g, big=false){
+  // если у группы задана своя обложка — показываем её фоном на всю карточку
+  const cover = g.cover;
   const slides = g.products.map((p,i)=>`
     <div class="gc-slide ${i===0?'active':''}" data-slide="${i}">
       <div class="gc-slide-img">${(p.images&&p.images[0])||p.image?`<img src="${esc((p.images&&p.images[0])||p.image)}">`:netPH()}</div>
@@ -136,8 +138,17 @@ function groupCard(g, big=false){
 
   const dots = g.products.map((_,i)=>`<button class="gc-dot ${i===0?'active':''}" data-dot="${i}" aria-label="Товар ${i+1}"></button>`).join('');
 
+  // Витрина группы: либо своя обложка, либо карусель товаров
+  const stage = cover
+    ? `<div class="gc-stage gc-cover-stage" data-carousel="${g.id}">
+         <img class="gc-cover-img" src="${esc(cover)}" alt="${esc(g.name)}">
+       </div>`
+    : `<div class="gc-stage" data-carousel="${g.id}">${slides}</div>
+       <div class="gc-dots">${dots}</div>`;
+
   return `<article class="group-card ${big?'big':'small'}" data-group="${g.id}">
     <span class="gc-count">${g.products.length} тов.</span>
+    ${S.state.isAdmin?`<button class="gc-edit" data-editgroup="${g.id}" title="Настроить витрину группы">🖼 Витрина</button>`:''}
     <div class="gc-head">
       <div>
         <div class="gc-title">${esc(g.name)}</div>
@@ -145,8 +156,7 @@ function groupCard(g, big=false){
       </div>
       ${g.badge?`<span class="gc-badge">${esc(g.badge)}</span>`:''}
     </div>
-    <div class="gc-stage" data-carousel="${g.id}">${slides}</div>
-    <div class="gc-dots">${dots}</div>
+    ${stage}
   </article>`;
 }
 
@@ -477,7 +487,7 @@ function pageProduct(params){
     $('#qPlus').onclick=()=>{qty++;$('#qInput').value=qty;};
     $('#qInput').oninput=e=>{qty=Math.max(1,parseInt(e.target.value)||1);};
     $('#buyBtn').onclick=()=>{ S.addToCart(p.id,curVar,qty); refreshChrome(); toast('Добавлено в корзину','success'); };
-    $('#favBtn').onclick=function(){ S.toggleFav(p.id); this.classList.toggle('active'); refreshChrome(); };
+    $('#favBtn').onclick=function(){ if(!Session.user()){ openAuthModal('login','Войдите, чтобы добавлять товары в избранное'); return; } S.toggleFav(p.id); this.classList.toggle('active'); refreshChrome(); };
     $('#oneClick').onclick=()=>oneClickModal(p,curVar,qty);
   }
   render();
@@ -612,6 +622,19 @@ function pageCheckout(){
    СТРАНИЦА: ИЗБРАННОЕ
 ============================================================ */
 function pageFavorites(){
+  // Гостю предлагаем войти
+  if(!Session.user()){
+    app.innerHTML = adminBar() + `<h1 class="page-title">Избранное</h1>` +
+      `<div class="empty-state">
+        <svg viewBox="0 0 24 24"><use href="#heart"/></svg>
+        <h3>Войдите, чтобы пользоваться избранным</h3>
+        <p>Сохраняйте понравившиеся товары в личном кабинете — они будут доступны с любого устройства.</p>
+        <button class="btn" id="favLoginBtn" style="margin-top:6px">Войти или зарегистрироваться</button>
+      </div>`;
+    const b=$('#favLoginBtn');
+    if(b) b.onclick=()=>openAuthModal('login','Войдите, чтобы пользоваться избранным');
+    return;
+  }
   const favs = S._favs.map(id=>S.product(id)).filter(Boolean);
   app.innerHTML = adminBar() + `<h1 class="page-title">Избранное</h1>` +
     (favs.length ? `<div class="catalog-grid">${favs.map(p=>productCard(p)).join('')}</div>`
@@ -664,15 +687,59 @@ function pageAccount(params){
     </div>`;
   }
   else if(tab==='profile'){
-    body.innerHTML = `<div class="panel" style="max-width:480px"><div class="form-grid">
-      <div class="field"><label>Имя</label><input id="pName" value="${esc(((Session.user()||{}).name||S.state.user.name))}"></div>
-      <div class="field"><label>Телефон</label><input id="pPhone" value="${esc(S.state.user.phone)}"></div>
-      <div class="field"><label>Email</label><input id="pEmail" value="${esc(S.state.user.email)}"></div>
+    const u = Session.user();
+    const avatar = u && u.avatar ? u.avatar : '';
+    const initial = ((u&&u.name)||S.state.user.name||'Г').trim().charAt(0).toUpperCase();
+    body.innerHTML = `<div class="panel" style="max-width:520px"><div class="form-grid">
+      <div class="profile-avatar-row">
+        <div class="profile-avatar" id="profAvatar">${avatar?`<img src="${esc(avatar)}" alt="">`:`<span>${esc(initial)}</span>`}</div>
+        <div style="flex:1">
+          <label class="btn sm" style="cursor:pointer;display:inline-block">
+            📷 Сменить аватар
+            <input type="file" id="avatarFile" accept="image/*" style="display:none">
+          </label>
+          ${avatar?`<button class="btn sm ghost" id="avatarRemove" style="margin-left:8px">Убрать</button>`:''}
+          <p style="color:var(--ink-dim);font-size:.78rem;margin:8px 0 0">Квадратное фото будет обрезано автоматически.</p>
+        </div>
+      </div>
+      <div class="field"><label>Имя</label><input id="pName" value="${esc(((u||{}).name||S.state.user.name))}"></div>
+      <div class="field"><label>Телефон</label><input id="pPhone" value="${esc((u&&u.phone)||S.state.user.phone)}"></div>
+      <div class="field"><label>Email</label><input id="pEmail" value="${esc((u&&u.email)||S.state.user.email)}" ${u?'readonly':''}></div>
+      <div class="field"><label>О себе</label><textarea id="pBio" rows="3" placeholder="Расскажите о себе, любимых местах рыбалки…">${esc((u&&u.bio)||'')}</textarea></div>
       <button class="btn" id="saveProfile">Сохранить</button>
     </div></div>`;
-    $('#saveProfile').onclick=()=>{
-      S.state.user={name:$('#pName').value||'Гость',phone:$('#pPhone').value,email:$('#pEmail').value};
-      S.save(); toast('Профиль сохранён','success');
+
+    // временное хранилище нового аватара
+    let newAvatar = avatar;
+    const avFile = $('#avatarFile');
+    if(avFile) avFile.onchange=function(){
+      const f=this.files[0]; this.value='';
+      if(!f) return;
+      const reader=new FileReader();
+      reader.onload=e=>openCropper(e.target.result, 1, (cropped)=>{
+        newAvatar = cropped;
+        $('#profAvatar').innerHTML = `<img src="${cropped}" alt="">`;
+      });
+      reader.readAsDataURL(f);
+    };
+    const avRm = $('#avatarRemove');
+    if(avRm) avRm.onclick=()=>{ newAvatar=''; $('#profAvatar').innerHTML=`<span>${esc(initial)}</span>`; };
+
+    $('#saveProfile').onclick=async ()=>{
+      if(u){
+        u.name=$('#pName').value||u.name;
+        u.phone=$('#pPhone').value;
+        u.bio=$('#pBio').value;
+        u.avatar=newAvatar;
+        Users.save(u);
+        Session._u = u;
+      } else {
+        S.state.user={name:$('#pName').value||'Гость',phone:$('#pPhone').value,email:$('#pEmail').value};
+        await S.save();
+      }
+      toast('Профиль сохранён','success');
+      refreshAuthUI && refreshAuthUI();
+      render();
     };
   }
   else if(tab==='fav'){
@@ -939,7 +1006,7 @@ function adminBar(){
     <button class="btn sm" id="abAdd">+ Новый товар</button>
     <button class="btn sm ghost" id="abClients">👥 Клиенты</button>
     <button class="btn sm ghost" id="abDiscounts">% Скидки</button>
-    <button class="btn sm ghost" id="abSaveContent">Сохранить тексты</button>
+    <button class="btn sm" id="abSaveContent">💾 Сохранить всё</button>
     <button class="btn sm danger" id="abReset">Сбросить всё</button>
   </div>`;
 }
@@ -951,9 +1018,23 @@ function bindAdminBar(){
   const addP=$('#addProd');
   if(addP) addP.onclick=()=>editProductModal(null, addP.dataset.gid || S.state.groups[0].id);
   const sc=$('#abSaveContent');
-  if(sc) sc.onclick=()=>{
+  if(sc) sc.onclick=async ()=>{
+    // собрать редактируемые тексты
     $$('.editable[data-content]').forEach(el=>{ S.state.content[el.dataset.content]=el.innerHTML; });
-    S.save(); toast('Тексты сохранены','success');
+    // собрать тексты кастомных блоков, если открыта страница раздела
+    $$('[data-block]').forEach(el=>{
+      const key=el.dataset.block, i=+el.dataset.bidx;
+      if(S.state.sections[key] && S.state.sections[key][i]){
+        const h3=el.querySelector('h3'), body=el.querySelector('div');
+        S.state.sections[key][i].title = h3?h3.textContent.trim():'';
+        S.state.sections[key][i].text = body?body.innerHTML:'';
+      }
+    });
+    sc.disabled=true; sc.textContent='Сохранение…';
+    const ok = await S.save();
+    sc.disabled=false; sc.textContent='💾 Сохранить всё';
+    if(ok) toast('Все изменения сохранены','success');
+    else toast('Не удалось сохранить — слишком большой объём данных','error');
   };
   const rs=$('#abReset');
   if(rs) rs.onclick=()=>{
@@ -969,6 +1050,8 @@ function bindAdminBar(){
 }
 function adminCardHandler(e){
   if(!S.state.isAdmin) return;
+  const eg=e.target.closest('[data-editgroup]');
+  if(eg){ e.preventDefault(); e.stopPropagation(); editGroupModal(eg.dataset.editgroup); return; }
   const ed=e.target.closest('[data-edit]'), dl=e.target.closest('[data-del]');
   if(ed){ e.preventDefault(); e.stopPropagation();
     const p=S.product(ed.dataset.edit);
@@ -983,6 +1066,78 @@ function adminCardHandler(e){
       S.save(); toast('Товар удалён'); render();
     }
   }
+}
+
+/* ============================================================
+   АДМИН: НАСТРОЙКА ВИТРИНЫ ГРУППЫ (обложка + название/подпись)
+============================================================ */
+function editGroupModal(gid){
+  const g = S.state.groups.find(x=>x.id===gid);
+  if(!g) return;
+  // соотношение витрины: большая карточка ~16:7, обычная ~3:2; берём широкое 16:9
+  const ASPECT = 16/9;
+
+  function coverPreview(){
+    return g.cover
+      ? `<div style="position:relative;display:inline-block">
+           <img src="${esc(g.cover)}" style="width:100%;max-width:340px;border-radius:10px;border:2px solid var(--orange);display:block">
+           <button id="gRmCover" style="position:absolute;top:8px;right:8px;background:#e06464;color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-weight:700">Убрать</button>
+         </div>`
+      : `<p style="color:var(--ink-dim);font-size:.85rem;margin:0">Обложка не задана — показывается карусель товаров группы.</p>`;
+  }
+
+  openModal(`
+    <h2>Витрина группы</h2>
+    <p style="color:var(--ink-dim);margin:4px 0 16px;font-size:.88rem">Загрузите свою картинку-обложку для группы «${esc(g.name)}». Она показывается на главной как лицо раздела. Без обложки крутится карусель товаров.</p>
+    <div class="form-grid">
+      <div class="field"><label>Название группы</label><input id="gName" value="${esc(g.name)}"></div>
+      <div class="field"><label>Подпись</label><input id="gTagline" value="${esc(g.tagline||'')}"></div>
+      <div class="field"><label>Бейдж (напр. «Главный товар»)</label><input id="gBadge" value="${esc(g.badge||'')}"></div>
+      <div class="field">
+        <label>Картинка-обложка</label>
+        <div id="gCoverPreview" style="margin-bottom:10px">${coverPreview()}</div>
+        <div style="display:flex;gap:8px">
+          <input id="gCoverUrl" placeholder="Вставьте URL картинки…" style="flex:1">
+          <button class="btn" id="gAddUrl" style="white-space:nowrap;padding:0 14px">+ URL</button>
+        </div>
+        <label class="btn" style="margin-top:8px;display:inline-block;cursor:pointer;padding:8px 14px;font-size:.85rem">
+          📁 Загрузить файл
+          <input type="file" id="gCoverFile" accept="image/*" style="display:none">
+        </label>
+      </div>
+      <button class="btn block" id="gSave">Сохранить витрину</button>
+    </div>
+  `);
+
+  function refreshCover(){
+    $('#gCoverPreview').innerHTML = coverPreview();
+    const rm=$('#gRmCover');
+    if(rm) rm.onclick=()=>{ g.cover=null; refreshCover(); };
+  }
+  refreshCover();
+
+  $('#gAddUrl').onclick=()=>{
+    const url=$('#gCoverUrl').value.trim();
+    if(!url) return;
+    $('#gCoverUrl').value='';
+    openCropper(url, ASPECT, (cropped)=>{ g.cover=cropped; refreshCover(); });
+  };
+  $('#gCoverFile').onchange=function(){
+    const f=this.files[0]; this.value='';
+    if(!f) return;
+    const reader=new FileReader();
+    reader.onload=e=>openCropper(e.target.result, ASPECT, (cropped)=>{ g.cover=cropped; refreshCover(); });
+    reader.readAsDataURL(f);
+  };
+  $('#gSave').onclick=async ()=>{
+    g.name=$('#gName').value.trim()||g.name;
+    g.tagline=$('#gTagline').value.trim();
+    g.badge=$('#gBadge').value.trim();
+    const ok=await S.save();
+    closeModal();
+    toast(ok?'Витрина сохранена':'Не удалось сохранить','success');
+    render();
+  };
 }
 
 function adminLogin(){
@@ -1479,6 +1634,7 @@ document.addEventListener('click', e=>{
   }
   const fav = e.target.closest('[data-fav]');
   if(fav){
+    if(!Session.user()){ openAuthModal('login','Войдите, чтобы добавлять товары в избранное'); return; }
     S.toggleFav(fav.dataset.fav);
     fav.classList.toggle('active');
     refreshChrome();
@@ -1501,10 +1657,25 @@ $('#searchInput').addEventListener('keydown',e=>{
 /* ============================================================
    АВТОРИЗАЦИЯ
 ============================================================ */
-function openAuthModal(tab='login'){
+function openAuthModal(tab='login', hint=''){
   const ov = $('#authOverlay');
   ov.removeAttribute('hidden');
   switchTab(tab);
+  // показать подсказку (зачем нужен вход), если передана
+  let hintEl = $('#authHint');
+  if(hint){
+    if(!hintEl){
+      hintEl = document.createElement('div');
+      hintEl.id = 'authHint';
+      hintEl.className = 'auth-hint';
+      const card = $('#authOverlay .auth-card') || $('#authOverlay > div');
+      if(card) card.insertBefore(hintEl, card.firstChild.nextSibling);
+    }
+    hintEl.textContent = hint;
+    hintEl.style.display = 'block';
+  } else if(hintEl){
+    hintEl.style.display = 'none';
+  }
   document.body.style.overflow='hidden';
 }
 function closeAuthModal(){
@@ -1521,7 +1692,8 @@ function refreshAuthUI(){
   if(u){
     guest.hidden=true; user.removeAttribute('hidden');
     const av = $('#userAvatar'); const nm = $('#userNameShort');
-    av.textContent = (u.name||'?')[0].toUpperCase();
+    if(u.avatar){ av.innerHTML = `<img src="${esc(u.avatar)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`; }
+    else { av.textContent = (u.name||'?')[0].toUpperCase(); }
     nm.textContent = (u.name||'').split(' ')[0] || u.email.split('@')[0];
     $('#favBadge').textContent = (u.favorites||[]).length;
     $('#cartCount').textContent = (u.cart||[]).reduce((s,i)=>s+i.qty,0);
@@ -1699,5 +1871,20 @@ initCaustics();
 initNet();
 initBubbles();
 render();
+
+// Загружаем надёжное хранилище (IndexedDB) и перерисовываем,
+// чтобы подхватить сохранённые картинки/тексты, которые не влезли в localStorage
+(async function(){
+  try {
+    await Promise.all([
+      S.init(),
+      Users.init ? Users.init() : Promise.resolve()
+    ]);
+    // восстановить сессию пользователя поверх свежих данных
+    Session.load();
+    render();
+    refreshChrome && refreshChrome();
+  } catch(e){ /* остаёмся на localStorage-версии */ }
+})();
 
 })();
