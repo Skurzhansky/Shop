@@ -91,7 +91,7 @@ function productCard(p, featured=false){
     ${badge}${adminEdit}
     <div class="prod-top">
       <a class="prod-media" href="#/product?id=${p.id}" data-link>
-        ${(p.images&&p.images[0])||p.image ? `<img src="${esc((p.images&&p.images[0])||p.image)}" alt="">` : netPH()}
+        ${(p.images&&p.images[0])||p.image ? `<img class="pm-blur" src="${esc((p.images&&p.images[0])||p.image)}" aria-hidden="true"><img class="pm-fg" src="${esc((p.images&&p.images[0])||p.image)}" alt="">` : netPH()}
       </a>
       <div class="prod-info">
         <a href="#/product?id=${p.id}" data-link><span class="prod-name">${esc(p.name)}</span></a>
@@ -122,32 +122,59 @@ function iconTrash(){return '<svg viewBox="0 0 24 24" fill="none" stroke="curren
    КОМПОНЕНТ: карточка-ГРУППА с каруселью товаров внутри
 ============================================================ */
 function groupCard(g, big=false){
-  // если у группы задана своя обложка — показываем её фоном на всю карточку
-  const cover = g.cover;
-  const slides = g.products.map((p,i)=>`
-    <div class="gc-slide ${i===0?'active':''}" data-slide="${i}">
-      <div class="gc-slide-img">${(p.images&&p.images[0])||p.image?`<img src="${esc((p.images&&p.images[0])||p.image)}">`:netPH()}</div>
-      <div class="gc-slide-cap">
-        <div>
-          <div class="nm">${esc(p.name)}</div>
-          <div class="sk">Артикул: ${esc(p.sku)}</div>
+  // Свои картинки витрины (до 5). Миграция со старого одиночного g.cover.
+  let covers = Array.isArray(g.covers) ? g.covers.filter(Boolean) : [];
+  if(!covers.length && g.cover) covers = [g.cover];
+
+  const products = g.products;
+
+  // Если админ задал свои картинки витрины — крутим их каруселью.
+  // Подпись (название/артикул/цена) берём из товаров группы по порядку.
+  const useCovers = covers.length > 0;
+
+  let slides, dotCount;
+  if(useCovers){
+    slides = covers.map((src,i)=>{
+      const p = products[i % products.length] || products[0] || {name:'',sku:'',price:0};
+      return `<div class="gc-slide ${i===0?'active':''}" data-slide="${i}">
+        <div class="gc-slide-img">
+          <img class="gc-blur" src="${esc(src)}" aria-hidden="true">
+          <img class="gc-fg gc-fg-cover" src="${esc(src)}" alt="${esc(p.name||g.name)}">
         </div>
-        <div class="pr">${money(p.price)}</div>
-      </div>
-    </div>`).join('');
+        <div class="gc-slide-cap">
+          <div>
+            <div class="nm">${esc(p.name||'')}</div>
+            <div class="sk">Артикул: ${esc(p.sku||'')}</div>
+          </div>
+          ${p.price?`<div class="pr">${money(p.price)}</div>`:''}
+        </div>
+      </div>`;
+    }).join('');
+    dotCount = covers.length;
+  } else {
+    const slideImg = (p) => {
+      const src = (p.images&&p.images[0])||p.image;
+      if(!src) return netPH();
+      return `<img class="gc-blur" src="${esc(src)}" aria-hidden="true"><img class="gc-fg" src="${esc(src)}">`;
+    };
+    slides = products.map((p,i)=>`
+      <div class="gc-slide ${i===0?'active':''}" data-slide="${i}">
+        <div class="gc-slide-img">${slideImg(p)}</div>
+        <div class="gc-slide-cap">
+          <div>
+            <div class="nm">${esc(p.name)}</div>
+            <div class="sk">Артикул: ${esc(p.sku)}</div>
+          </div>
+          <div class="pr">${money(p.price)}</div>
+        </div>
+      </div>`).join('');
+    dotCount = products.length;
+  }
 
-  const dots = g.products.map((_,i)=>`<button class="gc-dot ${i===0?'active':''}" data-dot="${i}" aria-label="Товар ${i+1}"></button>`).join('');
-
-  // Витрина группы: либо своя обложка, либо карусель товаров
-  const stage = cover
-    ? `<div class="gc-stage gc-cover-stage" data-carousel="${g.id}">
-         <img class="gc-cover-img" src="${esc(cover)}" alt="${esc(g.name)}">
-       </div>`
-    : `<div class="gc-stage" data-carousel="${g.id}">${slides}</div>
-       <div class="gc-dots">${dots}</div>`;
+  const dots = Array.from({length:dotCount},(_,i)=>`<button class="gc-dot ${i===0?'active':''}" data-dot="${i}" aria-label="Слайд ${i+1}"></button>`).join('');
 
   return `<article class="group-card ${big?'big':'small'}" data-group="${g.id}">
-    <span class="gc-count">${g.products.length} тов.</span>
+    <span class="gc-count">${products.length} тов.</span>
     ${S.state.isAdmin?`<button class="gc-edit" data-editgroup="${g.id}" title="Настроить витрину группы">🖼 Витрина</button>`:''}
     <div class="gc-head">
       <div>
@@ -156,7 +183,8 @@ function groupCard(g, big=false){
       </div>
       ${g.badge?`<span class="gc-badge">${esc(g.badge)}</span>`:''}
     </div>
-    ${stage}
+    <div class="gc-stage" data-carousel="${g.id}">${slides}</div>
+    <div class="gc-dots">${dots}</div>
   </article>`;
 }
 
@@ -1079,60 +1107,91 @@ function adminCardHandler(e){
 function editGroupModal(gid){
   const g = S.state.groups.find(x=>x.id===gid);
   if(!g) return;
-  // соотношение витрины: большая карточка ~16:7, обычная ~3:2; берём широкое 16:9
+  // широкий формат витрины
   const ASPECT = 16/9;
+  const MAX = 5;
 
-  function coverPreview(){
-    return g.cover
-      ? `<div style="position:relative;display:inline-block">
-           <img src="${esc(g.cover)}" style="width:100%;max-width:340px;border-radius:10px;border:2px solid var(--orange);display:block">
-           <button id="gRmCover" style="position:absolute;top:8px;right:8px;background:#e06464;color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-weight:700">Убрать</button>
-         </div>`
-      : `<p style="color:var(--ink-dim);font-size:.85rem;margin:0">Обложка не задана — показывается карусель товаров группы.</p>`;
+  // массив картинок витрины (миграция со старого одиночного g.cover)
+  if(!Array.isArray(g.covers)){
+    g.covers = g.cover ? [g.cover] : [];
+  }
+  delete g.cover;
+
+  function coversPreview(){
+    if(!g.covers.length){
+      return `<p style="color:var(--ink-dim);font-size:.85rem;margin:0">Картинки не заданы — показывается карусель фото товаров группы.</p>`;
+    }
+    return `<div style="display:flex;flex-wrap:wrap;gap:10px">${
+      g.covers.map((src,i)=>`
+        <div style="position:relative;width:130px">
+          <img src="${esc(src)}" style="width:130px;height:73px;object-fit:cover;border-radius:8px;border:2px solid var(--orange);display:block">
+          <button data-rmcover="${i}" style="position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;background:#e06464;color:#fff;border:none;cursor:pointer;font-size:.8rem;line-height:1">✕</button>
+          <span style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,.6);color:#fff;font-size:.62rem;padding:1px 5px;border-radius:5px">${i+1}</span>
+        </div>`).join('')
+    }</div>`;
   }
 
   openModal(`
     <h2>Витрина группы</h2>
-    <p style="color:var(--ink-dim);margin:4px 0 16px;font-size:.88rem">Загрузите свою картинку-обложку для группы «${esc(g.name)}». Она показывается на главной как лицо раздела. Без обложки крутится карусель товаров.</p>
+    <p style="color:var(--ink-dim);margin:4px 0 16px;font-size:.88rem">Загрузите до ${MAX} своих картинок для группы «${esc(g.name)}» — они будут меняться каруселью. Название, артикул и цена берутся из товаров группы автоматически. Картинки кадрируются под широкий формат витрины, поэтому ничего не растягивается.</p>
     <div class="form-grid">
       <div class="field"><label>Название группы</label><input id="gName" value="${esc(g.name)}"></div>
       <div class="field"><label>Подпись</label><input id="gTagline" value="${esc(g.tagline||'')}"></div>
       <div class="field"><label>Бейдж (напр. «Главный товар»)</label><input id="gBadge" value="${esc(g.badge||'')}"></div>
       <div class="field">
-        <label>Картинка-обложка</label>
-        <div id="gCoverPreview" style="margin-bottom:10px">${coverPreview()}</div>
+        <label>Картинки витрины <span id="gCoverCount" style="color:var(--ink-dim);font-weight:400">(${g.covers.length}/${MAX})</span></label>
+        <div id="gCoverPreview" style="margin-bottom:12px">${coversPreview()}</div>
         <div style="display:flex;gap:8px">
           <input id="gCoverUrl" placeholder="Вставьте URL картинки…" style="flex:1">
           <button class="btn" id="gAddUrl" style="white-space:nowrap;padding:0 14px">+ URL</button>
         </div>
-        <label class="btn" style="margin-top:8px;display:inline-block;cursor:pointer;padding:8px 14px;font-size:.85rem">
+        <label class="btn" id="gFileLabel" style="margin-top:8px;display:inline-block;cursor:pointer;padding:8px 14px;font-size:.85rem">
           📁 Загрузить файл
-          <input type="file" id="gCoverFile" accept="image/*" style="display:none">
+          <input type="file" id="gCoverFile" accept="image/*" multiple style="display:none">
         </label>
       </div>
       <button class="btn block" id="gSave">Сохранить витрину</button>
     </div>
   `);
 
-  function refreshCover(){
-    $('#gCoverPreview').innerHTML = coverPreview();
-    const rm=$('#gRmCover');
-    if(rm) rm.onclick=()=>{ g.cover=null; refreshCover(); };
+  function refreshCovers(){
+    $('#gCoverPreview').innerHTML = coversPreview();
+    $('#gCoverCount').textContent = `(${g.covers.length}/${MAX})`;
+    $$('[data-rmcover]').forEach(btn=>btn.onclick=()=>{
+      g.covers.splice(+btn.dataset.rmcover,1); refreshCovers();
+    });
+    // блокируем добавление при достижении лимита
+    const full = g.covers.length >= MAX;
+    $('#gAddUrl').disabled = full;
+    $('#gCoverFile').disabled = full;
+    $('#gFileLabel').style.opacity = full ? '.5' : '1';
+    $('#gFileLabel').style.pointerEvents = full ? 'none' : 'auto';
   }
-  refreshCover();
+  refreshCovers();
 
   $('#gAddUrl').onclick=()=>{
+    if(g.covers.length>=MAX){ toast(`Максимум ${MAX} картинок`,'error'); return; }
     const url=$('#gCoverUrl').value.trim();
     if(!url) return;
     $('#gCoverUrl').value='';
-    openCropper(url, ASPECT, (cropped)=>{ g.cover=cropped; refreshCover(); });
+    openCropper(url, ASPECT, (cropped)=>{ g.covers.push(cropped); refreshCovers(); });
   };
   $('#gCoverFile').onchange=function(){
-    const f=this.files[0]; this.value='';
-    if(!f) return;
-    const reader=new FileReader();
-    reader.onload=e=>openCropper(e.target.result, ASPECT, (cropped)=>{ g.cover=cropped; refreshCover(); });
-    reader.readAsDataURL(f);
+    const files = Array.from(this.files);
+    this.value='';
+    let i = 0;
+    function next(){
+      if(i>=files.length || g.covers.length>=MAX){
+        if(g.covers.length>=MAX && i<files.length) toast(`Добавлено максимум ${MAX} картинок`,'success');
+        return;
+      }
+      const reader=new FileReader();
+      reader.onload=e=>openCropper(e.target.result, ASPECT, (cropped)=>{
+        g.covers.push(cropped); refreshCovers(); i++; next();
+      });
+      reader.readAsDataURL(files[i]);
+    }
+    next();
   };
   $('#gSave').onclick=async ()=>{
     g.name=$('#gName').value.trim()||g.name;
