@@ -235,16 +235,38 @@ function uid() { return 'u' + Date.now() + Math.random().toString(36).slice(2, 7
 const Users = {
   _table: null,
 
-  /* асинхронная инициализация из IndexedDB (с миграцией из localStorage) */
+  /* асинхронная инициализация: облако (Supabase) → IndexedDB → localStorage */
   async init() {
     if (this._table) return;
+    // 1) облако — общий список клиентов для всех устройств
+    let cloudData = null;
+    try {
+      await Cloud.init();
+      if (Cloud.enabled) cloudData = await Cloud.loadClients();
+    } catch (e) { cloudData = null; }
+
+    if (cloudData && Object.keys(cloudData).length) {
+      this._table = cloudData;
+      // подстрахуемся локально
+      try { localStorage.setItem(USERS_KEY, JSON.stringify(this._table)); } catch (e) {}
+      DB.set(USERS_KEY, this._table);
+      return;
+    }
+
+    // 2) локальные данные
     let data = await DB.get(USERS_KEY);
     if (!data) {
-      // миграция старых данных из localStorage
       try { data = JSON.parse(localStorage.getItem(USERS_KEY)); } catch (e) { data = null; }
       if (data) { await DB.set(USERS_KEY, data); }
     }
     this._table = data || {};
+
+    // если есть локальные клиенты, а в облаке пусто — зальём в облако
+    if (Cloud.enabled && this._table && Object.keys(this._table).length) {
+      try {
+        for (const email in this._table) await Cloud.saveClient(this._table[email]);
+      } catch (e) {}
+    }
   },
 
   _load() {
@@ -258,6 +280,13 @@ const Users = {
     // память + персистентность в IndexedDB (фоном)
     try { localStorage.setItem(USERS_KEY, JSON.stringify(this._table)); } catch (e) {}
     DB.set(USERS_KEY, this._table);
+  },
+
+  /* сохранить одного клиента в облако (вызывается из save(u)) */
+  _saveClientCloud(u) {
+    if (Cloud.enabled && u && u.email) {
+      Cloud.saveClient(u).catch(() => {});
+    }
   },
 
   /* новый пустой профиль */
@@ -308,8 +337,10 @@ const Users = {
 
   remove(email) {
     this._load();
-    delete this._table[email.toLowerCase().trim()];
+    const key = email.toLowerCase().trim();
+    delete this._table[key];
     this._save();
+    if (Cloud.enabled) Cloud.deleteClient(key).catch(() => {});
   },
 
   /* регистрация → null если email уже занят */
@@ -320,6 +351,7 @@ const Users = {
     const u = this._blank(uid(), name.trim(), key, phone.trim(), hashPass(pass));
     this._table[key] = u;
     this._save();
+    this._saveClientCloud(u); // регистрация видна всем устройствам
     return u;
   },
 
@@ -337,6 +369,7 @@ const Users = {
     this._load();
     this._table[u.email] = u;
     this._save();
+    this._saveClientCloud(u); // синхронизация с облаком
   },
 
   get(email) {
@@ -485,14 +518,30 @@ const Store = {
     return t.slice().sort((a,b)=>a.orders-b.orders);
   },
 
-  /* асинхронная инициализация из IndexedDB (с миграцией из localStorage) */
+  /* асинхронная инициализация: облако (Supabase) → IndexedDB → localStorage */
   async init() {
-    let raw = await DB.get(STORE_KEY);
-    if (!raw) {
-      // миграция из localStorage
-      try { raw = JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) { raw = null; }
-      if (raw) await DB.set(STORE_KEY, raw);
+    // 1) пробуем облако — это общие данные для всех посетителей
+    let cloudRaw = null;
+    try {
+      await Cloud.init();
+      if (Cloud.enabled) cloudRaw = await Cloud.loadState();
+    } catch (e) { cloudRaw = null; }
+
+    let raw = cloudRaw;
+
+    // 2) если облако пустое/недоступно — берём локальные данные
+    if (!raw || !raw.groups) {
+      raw = await DB.get(STORE_KEY);
+      if (!raw) {
+        try { raw = JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) { raw = null; }
+        if (raw) await DB.set(STORE_KEY, raw);
+      }
+      // если есть локальные данные, а облако настроено но пустое — зальём локальные в облако
+      if (raw && raw.groups && Cloud.enabled && (!cloudRaw || !cloudRaw.groups)) {
+        try { await Cloud.saveState(raw); } catch (e) {}
+      }
     }
+
     try {
       this.state = raw ? Object.assign(this._defaults(), raw) : this._defaults();
       if (!this.state.groups) this.state.groups = JSON.parse(JSON.stringify(DEFAULT_GROUPS));
@@ -517,13 +566,17 @@ const Store = {
     return this.state;
   },
 
-  /* save → возвращает Promise<bool> (успех записи в надёжное хранилище) */
+  /* save → Promise<bool>. Пишет в облако (для всех) + локально (резерв) */
   save() {
     const {isAdmin, ...rest} = this.state;
-    // лёгкая попытка в localStorage (может упасть на больших картинках)
+    // локальный резерв
     try { localStorage.setItem(STORE_KEY, JSON.stringify(rest)); } catch (e) {}
-    // основное хранилище — IndexedDB
-    return DB.set(STORE_KEY, rest);
+    const localP = DB.set(STORE_KEY, rest);
+    // облако — общее хранилище
+    if (Cloud.enabled) {
+      return Cloud.saveState(rest).then(ok => ok).catch(() => localP);
+    }
+    return localP;
   },
 
   reset() {

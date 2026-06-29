@@ -1001,8 +1001,13 @@ function emptyState(title,text,link,btn){
 ============================================================ */
 function adminBar(){
   if(!S.state.isAdmin) return '';
+  const cloudOn = (typeof Cloud!=='undefined' && Cloud.enabled);
+  const cloudTag = cloudOn
+    ? `<span class="cloud-status on" title="Данные сохраняются в облаке и видны всем посетителям">☁ Облако подключено</span>`
+    : `<span class="cloud-status off" title="Данные хранятся только в этом браузере. Настройте Supabase — см. SUPABASE_SETUP.md">⚠ Только этот браузер</span>`;
   return `<div class="admin-controls">
     <span class="hc-tag" style="background:var(--orange);color:#15293f;position:static">Режим администратора</span>
+    ${cloudTag}
     <button class="btn sm" id="abAdd">+ Новый товар</button>
     <button class="btn sm ghost" id="abClients">👥 Клиенты</button>
     <button class="btn sm ghost" id="abDiscounts">% Скидки</button>
@@ -1461,7 +1466,7 @@ function openCropper(dataUrl, aspectRatio, onDone){
       <h3 class="cropper-title">Кадрирование фото</h3>
       <p class="cropper-hint">Перетаскивайте фото и меняйте масштаб, чтобы выбрать видимую область</p>
       <div class="cropper-stage" id="cropStage">
-        <img id="cropImg" src="${dataUrl}" alt="">
+        <img id="cropImg" crossorigin="anonymous" src="${dataUrl}" alt="">
         <div class="cropper-frame"></div>
       </div>
       <div class="cropper-zoom">
@@ -1515,6 +1520,17 @@ function openCropper(dataUrl, aspectRatio, onDone){
     scale = 1;
     apply();
   };
+  // Если картинка по URL не загрузилась (битая ссылка/CORS) — предложим сохранить ссылку как есть
+  img.onerror = ()=>{
+    cleanup();
+    if (typeof dataUrl === 'string' && !dataUrl.startsWith('data:')) {
+      // это внешний URL — сохраняем напрямую
+      onDone(dataUrl);
+      if (typeof toast === 'function') toast('Фото добавлено по ссылке (без кадрирования)','success');
+    } else {
+      if (typeof toast === 'function') toast('Не удалось загрузить изображение','error');
+    }
+  };
   if(img.complete && img.naturalWidth) img.onload();
 
   // Зум
@@ -1550,7 +1566,7 @@ function openCropper(dataUrl, aspectRatio, onDone){
   }
 
   overlay.querySelector('#cropCancel').onclick = cleanup;
-  overlay.querySelector('#cropApply').onclick = ()=>{
+  overlay.querySelector('#cropApply').onclick = async ()=>{
     // Рендерим выбранную область в canvas
     clamp();
     const OUT_W = 800;
@@ -1558,17 +1574,38 @@ function openCropper(dataUrl, aspectRatio, onDone){
     const canvas = document.createElement('canvas');
     canvas.width = OUT_W; canvas.height = OUT_H;
     const ctx = canvas.getContext('2d');
-    // Текущий отображаемый размер картинки
     const dispW = baseW*scale, dispH = baseH*scale;
-    // Масштаб от отображения к натуральному
     const k = imgNatW / dispW;
-    // Какая часть натурального изображения попадает в рамку
     const srcX = (-posX) * k;
     const srcY = (-posY) * k;
     const srcW = FRAME_W * k;
     const srcH = FRAME_H * k;
-    ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, OUT_W, OUT_H);
-    const out = canvas.toDataURL('image/jpeg', 0.88);
+
+    let out;
+    try {
+      ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, OUT_W, OUT_H);
+      out = canvas.toDataURL('image/jpeg', 0.88);
+    } catch (e) {
+      // Внешний URL без CORS — кадрировать нельзя, сохраняем ссылку как есть
+      cleanup();
+      onDone(dataUrl);
+      return;
+    }
+
+    // Если облако подключено — грузим картинку в Storage, получаем публичную ссылку
+    const applyBtn = overlay.querySelector('#cropApply');
+    if (typeof Cloud !== 'undefined' && Cloud.enabled) {
+      applyBtn.disabled = true;
+      applyBtn.textContent = 'Загрузка…';
+      try {
+        const url = await Cloud.uploadImage(out);
+        cleanup();
+        onDone(url);
+        return;
+      } catch (e) { /* fallback ниже */ }
+      applyBtn.disabled = false;
+      applyBtn.textContent = 'Применить';
+    }
     cleanup();
     onDone(out);
   };
