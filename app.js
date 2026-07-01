@@ -17,7 +17,7 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 
 /* ---- иконка-«сеть» как плейсхолдер изображения ---- */
 const netPH = () => `<svg class="ph-net" viewBox="0 0 100 100">
-  <g fill="none" stroke="currentColor" stroke-width="2.2">
+  <g fill="none" stroke="currentColor" stroke-width="1.1">
     <path d="M8 22 Q50 12 92 22 L86 86 Q50 96 14 86 Z"/>
     ${[26,40,54,68,82].map(y=>`<path d="M${10+(y-22)*0.08} ${y} Q50 ${y-6} ${90-(y-22)*0.08} ${y}"/>`).join('')}
     ${[20,35,50,65,80].map(x=>`<path d="M${x} 18 L${x} 88"/>`).join('')}
@@ -115,8 +115,8 @@ function productCard(p, featured=false){
   </article>`;
 }
 
-function iconPencil(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L18.5 9.5a2 2 0 0 0-3-3L5 17v3z"/><path d="M14 6l3 3"/></svg>';}
-function iconTrash(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>';}
+function iconPencil(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M4 20h4L18.5 9.5a2 2 0 0 0-3-3L5 17v3z"/><path d="M14 6l3 3"/></svg>';}
+function iconTrash(){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>';}
 
 /* ============================================================
    КОМПОНЕНТ: карточка-ГРУППА с каруселью товаров внутри
