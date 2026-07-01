@@ -249,12 +249,18 @@
 // Helper functions that must exist before app.js loads
 function togglePass(id, btn) {
   const inp = document.getElementById(id);
-  inp.type = inp.type === 'password' ? 'text' : 'password';
+  if(inp) inp.type = inp.type === 'password' ? 'text' : 'password';
 }
 function switchTab(tab) {
   document.querySelectorAll('.auth-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.auth-panel').forEach(p => p.classList.toggle('active', p.id === 'panel' + tab.charAt(0).toUpperCase() + tab.slice(1)));
 }
+// Самопривязка кликов по вкладкам — работает даже если app.js ещё не загрузился
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('.auth-tab').forEach(function(t){
+    t.addEventListener('click', function(){ switchTab(t.dataset.tab); });
+  });
+});
 </script>
 <script src="config.js"></script>
 <script src="cloud.js"></script>

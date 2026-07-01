@@ -91,7 +91,7 @@ function productCard(p, featured=false){
     ${badge}${adminEdit}
     <div class="prod-top">
       <a class="prod-media" href="#/product?id=${p.id}" data-link>
-        ${(p.images&&p.images[0])||p.image ? `<img class="pm-blur" src="${esc((p.images&&p.images[0])||p.image)}" aria-hidden="true"><img class="pm-fg" src="${esc((p.images&&p.images[0])||p.image)}" alt="">` : netPH()}
+        ${(p.images&&p.images[0])||p.image ? `<img src="${esc((p.images&&p.images[0])||p.image)}" alt="">` : netPH()}
       </a>
       <div class="prod-info">
         <a href="#/product?id=${p.id}" data-link><span class="prod-name">${esc(p.name)}</span></a>
@@ -138,8 +138,7 @@ function groupCard(g, big=false){
       const p = products[i % products.length] || products[0] || {name:'',sku:'',price:0};
       return `<div class="gc-slide ${i===0?'active':''}" data-slide="${i}">
         <div class="gc-slide-img">
-          <img class="gc-blur" src="${esc(src)}" aria-hidden="true">
-          <img class="gc-fg gc-fg-cover" src="${esc(src)}" alt="${esc(p.name||g.name)}">
+          <img src="${esc(src)}" alt="${esc(p.name||g.name)}">
         </div>
         <div class="gc-slide-cap">
           <div>
@@ -155,7 +154,7 @@ function groupCard(g, big=false){
     const slideImg = (p) => {
       const src = (p.images&&p.images[0])||p.image;
       if(!src) return netPH();
-      return `<img class="gc-blur" src="${esc(src)}" aria-hidden="true"><img class="gc-fg" src="${esc(src)}">`;
+      return `<img src="${esc(src)}" alt="${esc(p.name)}">`;
     };
     slides = products.map((p,i)=>`
       <div class="gc-slide ${i===0?'active':''}" data-slide="${i}">
@@ -1753,10 +1752,45 @@ $('#searchInput').addEventListener('keydown',e=>{
 /* ============================================================
    АВТОРИЗАЦИЯ
 ============================================================ */
+// Надёжное переключение вкладок Войти/Регистрация — работает независимо
+// от инлайн-скрипта в HTML. Делегирование на overlay переживает перерисовки.
+function doSwitchTab(tab){
+  const overlay = $('#authOverlay');
+  if(!overlay) return;
+  overlay.querySelectorAll('.auth-tab').forEach(t=>{
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+  overlay.querySelectorAll('.auth-panel').forEach(pn=>{
+    const want = 'panel' + tab.charAt(0).toUpperCase() + tab.slice(1);
+    pn.classList.toggle('active', pn.id === want);
+  });
+}
+// перекрываем глобальную, чтобы onclick в HTML тоже звал надёжную версию
+window.switchTab = doSwitchTab;
+
+// Делегирование кликов внутри окна авторизации:
+// - вкладки .auth-tab (data-tab)
+// - ссылки-переключатели внизу форм (onclick="switchTab('...')")
+(function bindAuthTabs(){
+  const overlay = $('#authOverlay');
+  if(!overlay) return;
+  overlay.addEventListener('click', (e)=>{
+    const tabBtn = e.target.closest('.auth-tab');
+    if(tabBtn && tabBtn.dataset.tab){ e.preventDefault(); doSwitchTab(tabBtn.dataset.tab); return; }
+    const linkBtn = e.target.closest('.auth-link-btn');
+    if(linkBtn){
+      e.preventDefault();
+      // определяем целевую вкладку по тексту ссылки
+      const goRegister = /регистр/i.test(linkBtn.textContent);
+      doSwitchTab(goRegister ? 'register' : 'login');
+    }
+  });
+})();
+
 function openAuthModal(tab='login', hint=''){
   const ov = $('#authOverlay');
   ov.removeAttribute('hidden');
-  switchTab(tab);
+  doSwitchTab(tab);
   // показать подсказку (зачем нужен вход), если передана
   let hintEl = $('#authHint');
   if(hint){
