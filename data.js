@@ -653,6 +653,39 @@ Object.assign(Store, {
   },
   placeOrder(info){
     if(this._u){ return Session.placeOrder(info,id=>this.product(id)); }
+
+    // ГОСТЬ оформляет заказ без регистрации — аккаунт создаётся/находится
+    // автоматически по email (если указан) или по телефону, и заказ
+    // подвязывается к нему. Пароль не запрашивается: повторный вход
+    // на этот же клиент сейчас возможен только с этого браузера
+    // (сессия), либо через будущий вход по SMS/Telegram.
+    const digits = (info.phone||'').replace(/\D/g,'');
+    const key = (info.email && info.email.trim())
+      ? info.email.trim().toLowerCase()
+      : `g${digits || Date.now()}@guest.rybhoz`;
+
+    let u = Users.get(key);
+    if(!u){
+      u = Users.register(info.name||'Клиент', key, info.phone||'', Math.random().toString(36).slice(2,10));
+    }
+
+    if(u){
+      // перенести локальную гостевую корзину/заказы (если были) в новый аккаунт
+      const cart = JSON.parse(JSON.stringify(this._cart||[]));
+      const total = cart.reduce((s,i)=>{const p=this.product(i.pid);return p?s+p.price*i.qty:s;},0);
+      const order = { id:'RH-'+Math.floor(100000+Math.random()*900000),
+        date:new Date().toLocaleDateString('ru-RU'),
+        items: cart, total, info, status:'way' };
+      u.orders.unshift(order);
+      u.bonus = (u.bonus||0) + Math.round(total*0.05);
+      u.cart = [];
+      Users.save(u);
+      Session.start(u); // тихо авторизуем в этом браузере — виден кабинет/бонусы/история
+      this.state.cart = []; this.save();
+      return order;
+    }
+
+    // фолбэк — если по какой-то причине аккаунт создать не удалось
     const total=this.cartTotal();
     const order={id:'RH-'+Math.floor(100000+Math.random()*900000),
       date:new Date().toLocaleDateString('ru-RU'),
