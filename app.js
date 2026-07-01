@@ -1064,7 +1064,7 @@ function adminBar(){
     ? `<span class="cloud-status on" title="Данные сохраняются в облаке и видны всем посетителям">☁ Облако подключено</span>`
     : `<span class="cloud-status off" title="Данные хранятся только в этом браузере. Настройте Supabase — см. SUPABASE_SETUP.md">⚠ Только этот браузер</span>`;
   return `<div class="admin-controls">
-    <span class="hc-tag" style="background:var(--orange);color:#15293f;position:static">Режим администратора</span>
+    <span style="color:#5fd08a;font-weight:700;font-size:.85rem">Режим администратора</span>
     ${cloudTag}
     <button class="btn sm" id="abAdd">+ Новый товар</button>
     <button class="btn sm ghost" id="abClients">👥 Клиенты</button>
