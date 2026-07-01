@@ -12,6 +12,10 @@ Session.load(); // загружаем сессию пользователя ср
 const app = document.getElementById('app');
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+/* безопасное навешивание обработчиков: если элемента нет в DOM — просто
+   пропускаем, а не роняем весь скрипт (защита от рассинхрона версий файлов) */
+const on = (sel, fn) => { const el=$(sel); if(el) el.onclick=fn; return el; };
+const onEvt = (sel, type, fn) => { const el=$(sel); if(el) el.addEventListener(type, fn); return el; };
 const money = n => n.toLocaleString('ru-RU') + ' ₽';
 const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -1727,7 +1731,7 @@ function openModal(html){
   $('#modalClose').onclick=closeModal;
 }
 function closeModal(){ $('#modalOverlay').hidden=true; }
-$('#modalOverlay').addEventListener('click',e=>{ if(e.target.id==='modalOverlay')closeModal(); });
+onEvt('#modalOverlay','click',e=>{ if(e.target.id==='modalOverlay')closeModal(); });
 
 /* ============================================================
    РОУТЕР
@@ -1802,8 +1806,8 @@ document.addEventListener('click', e=>{
 });
 
 /* шапка */
-$('#cartBtn').onclick=()=>go('#/cart');
-$('#searchInput').addEventListener('keydown',e=>{
+on('#cartBtn',()=>go('#/cart'));
+onEvt('#searchInput','keydown',e=>{
   if(e.key==='Enter'){ go('#/catalog?q='+encodeURIComponent(e.target.value.trim())); closeMobileNav(); }
 });
 
@@ -1870,8 +1874,8 @@ function closeAuthModal(){
   $('#authOverlay').setAttribute('hidden','');
   document.body.style.overflow='';
 }
-$('#authClose').onclick = closeAuthModal;
-$('#authOverlay').addEventListener('click',e=>{ if(e.target===$('#authOverlay')) closeAuthModal(); });
+on('#authClose', closeAuthModal);
+onEvt('#authOverlay','click',e=>{ if(e.target===$('#authOverlay')) closeAuthModal(); });
 
 // Обновить шапку после логина/логаута
 function refreshAuthUI(){
@@ -1893,10 +1897,10 @@ function refreshAuthUI(){
 }
 
 // Вход
-$('#btnLogin').onclick = ()=>openAuthModal('login');
-$('#btnRegister').onclick = ()=>openAuthModal('register');
+on('#btnLogin', ()=>openAuthModal('login'));
+on('#btnRegister', ()=>openAuthModal('register'));
 
-$('#btnDoLogin').onclick = ()=>{
+on('#btnDoLogin', ()=>{
   const email = $('#loginEmail').value.trim();
   const pass  = $('#loginPass').value;
   const err   = $('#loginError');
@@ -1909,9 +1913,9 @@ $('#btnDoLogin').onclick = ()=>{
   refreshAuthUI();
   toast(`Добро пожаловать, ${u.name||u.email}!`,'success');
   render();
-};
+});
 
-$('#btnDoRegister').onclick = ()=>{
+on('#btnDoRegister', ()=>{
   const name  = $('#regName').value.trim();
   const email = $('#regEmail').value.trim();
   const phone = $('#regPhone').value.trim();
@@ -1928,14 +1932,14 @@ $('#btnDoRegister').onclick = ()=>{
   refreshAuthUI();
   toast(`Аккаунт создан. Добро пожаловать, ${name}!`,'success');
   render();
-};
+});
 
-$('#btnLogout').onclick = ()=>{
+on('#btnLogout', ()=>{
   Session.end(); refreshAuthUI(); toast('Вы вышли из аккаунта'); render();
-};
+});
 
 // Пароль - сила
-$('#regPass').addEventListener('input',function(){
+onEvt('#regPass','input',function(){
   const v=this.value; const bar=$('#pwBar');
   const s=v.length>10&&/[A-Z]/.test(v)&&/\d/.test(v)?100:v.length>6?60:v.length>3?30:0;
   bar.style.width=s+'%';
