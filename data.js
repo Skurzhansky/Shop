@@ -292,6 +292,7 @@ const Users = {
   /* новый пустой профиль */
   _blank(id, name, email, phone, passHash) {
     return { id, name, email: email.toLowerCase().trim(), phone, passHash,
+      passwordSet: true,        // false — пароль сгенерирован автоматически (гостевой заказ), клиент его не знает
       cart: [], favorites: [], orders: [], bonus: 0,
       manualDiscount: 0,        // ручная скидка %, назначенная админом
       autoDiscountOff: false,   // автоскидка отключена индивидуально для этого клиента
@@ -377,11 +378,24 @@ const Users = {
     return this._table[email.toLowerCase().trim()] || null;
   },
 
-  /* сменить пароль */
+  /* сменить пароль (требует старый — для аккаунтов с уже заданным паролем) */
   changePass(email, oldPass, newPass) {
     const u = this.get(email);
     if (!u || u.passHash !== hashPass(oldPass)) return false;
     u.passHash = hashPass(newPass);
+    u.passwordSet = true;
+    this.save(u);
+    return true;
+  },
+
+  /* задать пароль впервые (без проверки старого — только для аккаунтов,
+     где passwordSet=false, т.е. пароль был сгенерирован автоматически
+     при гостевом заказе и клиент его не знает) */
+  setPass(email, newPass) {
+    const u = this.get(email);
+    if (!u) return false;
+    u.passHash = hashPass(newPass);
+    u.passwordSet = true;
     this.save(u);
     return true;
   },
@@ -489,6 +503,7 @@ const Store = {
       groups: JSON.parse(JSON.stringify(DEFAULT_GROUPS)),
       blog:   JSON.parse(JSON.stringify(DEFAULT_BLOG)),
       isAdmin: false,
+      adminPassHash: hashPass('admin'), // пароль администратора (по умолчанию "admin", меняется в админ-панели)
       content: {},
       /* настройки скидок */
       discounts: {
@@ -516,6 +531,17 @@ const Store = {
   discountTiers() {
     const t = (this.state.discounts && this.state.discounts.tiers) || [];
     return t.slice().sort((a,b)=>a.orders-b.orders);
+  },
+
+  /* ---- пароль администратора ---- */
+  checkAdminPass(pass) {
+    return hashPass(pass||'') === (this.state.adminPassHash || hashPass('admin'));
+  },
+  async changeAdminPass(oldPass, newPass) {
+    if (!this.checkAdminPass(oldPass)) return false;
+    this.state.adminPassHash = hashPass(newPass);
+    await this.save();
+    return true;
   },
 
   /* асинхронная инициализация: облако (Supabase) → IndexedDB → localStorage */
@@ -667,6 +693,7 @@ Object.assign(Store, {
     let u = Users.get(key);
     if(!u){
       u = Users.register(info.name||'Клиент', key, info.phone||'', Math.random().toString(36).slice(2,10));
+      if(u){ u.passwordSet = false; Users.save(u); }
     }
 
     if(u){

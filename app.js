@@ -53,9 +53,6 @@ function refreshChrome(){
   $$('.mainnav-inner a[data-link]').forEach(a=>{
     a.classList.toggle('active', a.getAttribute('href')===route);
   });
-  const adminBtn = $('#adminToggle');
-  adminBtn.classList.toggle('on', S.state.isAdmin);
-  adminBtn.textContent = S.state.isAdmin ? 'Выйти из админа' : 'Админ';
   $('#modeIndicator').textContent = S.state.isAdmin ? 'Режим администратора' : '';
   document.body.classList.toggle('admin', S.state.isAdmin);
 }
@@ -734,7 +731,19 @@ function pageAccount(params){
       <div class="field"><label>Email</label><input id="pEmail" value="${esc((u&&u.email)||S.state.user.email)}" ${u?'readonly':''}></div>
       <div class="field"><label>О себе</label><textarea id="pBio" rows="3" placeholder="Расскажите о себе, любимых местах рыбалки…">${esc((u&&u.bio)||'')}</textarea></div>
       <button class="btn" id="saveProfile">Сохранить</button>
-    </div></div>`;
+    </div></div>
+    ${u?`<div class="panel" style="max-width:520px;margin-top:16px">
+      <h3 style="font-family:Montserrat;color:var(--orange);margin-top:0">${u.passwordSet?'Смена пароля':'Задать пароль для входа'}</h3>
+      ${u.passwordSet
+        ? `<p style="color:var(--ink-dim);font-size:.85rem;margin:0 0 12px">Чтобы сменить пароль, введите текущий и новый.</p>`
+        : `<p style="color:var(--ink-dim);font-size:.85rem;margin:0 0 12px">Ваш аккаунт был создан автоматически при заказе. Задайте пароль, чтобы входить с других устройств.</p>`}
+      <div class="form-grid">
+        ${u.passwordSet?`<div class="field"><label>Текущий пароль</label><input type="password" id="cpOld"></div>`:''}
+        <div class="field"><label>Новый пароль</label><input type="password" id="cpNew"></div>
+        <div class="field"><label>Повторите новый пароль</label><input type="password" id="cpNew2"></div>
+        <button class="btn" id="cpSave">${u.passwordSet?'Сменить пароль':'Задать пароль'}</button>
+      </div>
+    </div>`:''}`;
 
     // временное хранилище нового аватара
     let newAvatar = avatar;
@@ -766,6 +775,24 @@ function pageAccount(params){
       }
       toast('Профиль сохранён','success');
       refreshAuthUI && refreshAuthUI();
+      render();
+    };
+
+    const cpSave = $('#cpSave');
+    if(cpSave) cpSave.onclick=()=>{
+      const np=$('#cpNew').value, np2=$('#cpNew2').value;
+      if(!np || np.length<4){ toast('Пароль — минимум 4 символа','error'); return; }
+      if(np!==np2){ toast('Пароли не совпадают','error'); return; }
+      let ok;
+      if(u.passwordSet){
+        const oldPass=$('#cpOld').value;
+        ok = Users.changePass(u.email, oldPass, np);
+        if(!ok){ toast('Неверный текущий пароль','error'); return; }
+      } else {
+        ok = Users.setPass(u.email, np);
+      }
+      Session.refresh();
+      toast('Пароль сохранён','success');
       render();
     };
   }
@@ -1038,8 +1065,10 @@ function adminBar(){
     <button class="btn sm" id="abAdd">+ Новый товар</button>
     <button class="btn sm ghost" id="abClients">👥 Клиенты</button>
     <button class="btn sm ghost" id="abDiscounts">% Скидки</button>
+    <button class="btn sm ghost" id="abAdminPass">🔑 Пароль админа</button>
     <button class="btn sm" id="abSaveContent">💾 Сохранить всё</button>
     <button class="btn sm danger" id="abReset">Сбросить всё</button>
+    <button class="btn sm ghost" id="abLogoutAdmin" style="margin-left:auto">Выйти из админа</button>
   </div>`;
 }
 
@@ -1068,6 +1097,10 @@ function bindAdminBar(){
     if(ok) toast('Все изменения сохранены','success');
     else toast('Не удалось сохранить — слишком большой объём данных','error');
   };
+  const abap=$('#abAdminPass');
+  if(abap) abap.onclick=adminChangePassModal;
+  const abLogout=$('#abLogoutAdmin');
+  if(abLogout) abLogout.onclick=()=>{ S.state.isAdmin=false; refreshChrome(); render(); toast('Вы вышли из режима администратора'); };
   const rs=$('#abReset');
   if(rs) rs.onclick=()=>{
     if(confirm('Сбросить все товары, тексты и заказы к исходным? Это действие необратимо.')){
@@ -1208,18 +1241,37 @@ function adminLogin(){
   openModal(`
     <h2>Вход для администратора</h2>
     <p style="color:var(--ink-dim);margin:4px 0 16px">Введите пароль для редактирования магазина.</p>
-    <div class="field"><label>Пароль</label><input type="password" id="admPass" placeholder="admin" autofocus></div>
-    <p style="color:#6f8aa0;font-size:.78rem;margin:8px 0 16px">Демо-пароль: <b>admin</b></p>
+    <div class="field"><label>Пароль</label><input type="password" id="admPass" autofocus></div>
     <button class="btn block" id="admEnter">Войти</button>
   `);
   const tryLogin=()=>{
-    if($('#admPass').value==='admin'){
+    if(S.checkAdminPass($('#admPass').value)){
       S.state.isAdmin=true; closeModal(); refreshChrome(); render();
       toast('Добро пожаловать, администратор','success');
     } else toast('Неверный пароль','error');
   };
   $('#admEnter').onclick=tryLogin;
   $('#admPass').onkeydown=e=>{if(e.key==='Enter')tryLogin();};
+}
+
+function adminChangePassModal(){
+  openModal(`
+    <h2>Смена пароля администратора</h2>
+    <div class="form-grid">
+      <div class="field"><label>Текущий пароль</label><input type="password" id="apOld"></div>
+      <div class="field"><label>Новый пароль</label><input type="password" id="apNew"></div>
+      <div class="field"><label>Повторите новый пароль</label><input type="password" id="apNew2"></div>
+      <button class="btn block" id="apSave">Сохранить</button>
+    </div>
+  `);
+  $('#apSave').onclick=async ()=>{
+    const oldPass=$('#apOld').value, np=$('#apNew').value, np2=$('#apNew2').value;
+    if(!np || np.length<4){ toast('Новый пароль — минимум 4 символа','error'); return; }
+    if(np!==np2){ toast('Пароли не совпадают','error'); return; }
+    const ok = await S.changeAdminPass(oldPass, np);
+    if(ok){ closeModal(); toast('Пароль администратора изменён','success'); }
+    else toast('Неверный текущий пароль','error');
+  };
 }
 
 /* ============================================================
@@ -1701,6 +1753,13 @@ function go(hash){ location.hash = hash; }
 function render(){
   _carouselTimers.forEach(t=>clearInterval(t)); _carouselTimers.length=0;
   const hash = location.hash || '#/';
+  // скрытый вход для администратора: адрес сайта + #/admin
+  if(hash.split('?')[0] === '#/admin'){
+    history.replaceState(null,'',location.pathname+location.search+'#/');
+    adminLogin();
+    render();
+    return;
+  }
   const [path, qs] = hash.split('?');
   const params = new URLSearchParams(qs||'');
   const fn = routes[path] || pageHome;
@@ -1744,7 +1803,6 @@ document.addEventListener('click', e=>{
 
 /* шапка */
 $('#cartBtn').onclick=()=>go('#/cart');
-$('#adminToggle').onclick=adminLogin;
 $('#searchInput').addEventListener('keydown',e=>{
   if(e.key==='Enter'){ go('#/catalog?q='+encodeURIComponent(e.target.value.trim())); closeMobileNav(); }
 });
